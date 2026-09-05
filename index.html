@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0F3D3E" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Paddle Queue" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+<title>Paddle Queue</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  body { -webkit-tap-highlight-color: transparent; }
+  input[type="range"] { -webkit-appearance: none; height: 6px; border-radius: 3px; background: #DAD4C2; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #0F3D3E; cursor: pointer; }
+  input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: #0F3D3E; border: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+const COLORS = {
+  bg: "#F6F3E9", paper: "#FFFFFF", court: "#0F3D3E", courtLight: "#1D5B54",
+  courtLine: "#2E6B64", ball: "#D7E84C", coral: "#E2593D", ink: "#152625",
+  inkSoft: "#5B6E6A", line: "#DAD4C2", chalk: "#CFE8DF",
+};
+const DISPLAY_FONT = "'Archivo Black','Arial Black',sans-serif";
+const BODY_FONT = "'Inter','Segoe UI',system-ui,sans-serif";
+const STORAGE_KEY = "paddle-queue-state-v1";
+
+const TIERS = [
+  { id: "beginner", label: "Beginner", min: 2.0, max: 2.5 },
+  { id: "intermediate", label: "Intermediate", min: 3.0, max: 3.5 },
+  { id: "advanced", label: "Advanced", min: 4.0, max: 4.5 },
+  { id: "elite", label: "Elite", min: 5.0, max: 5.5 },
+];
+function getTier(skill) {
+  return TIERS.find((t) => skill >= t.min && skill <= t.max) || TIERS[TIERS.length - 1];
+}
+const GENDER_LABEL = { F: "Woman", M: "Man", X: "Other" };
+const GENDER_GROUP_LABEL = { F: "Women", M: "Men", X: "Other" };
+const GENDER_COLOR = { F: COLORS.coral, M: COLORS.courtLight, X: "#8A7F5F" };
+
+function loadSaved() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return null;
+}
+
+function GenderChip({ gender }) {
+  return (
+    <span
+      style={{ background: GENDER_COLOR[gender], color: "#fff", width: "1.5rem", height: "1.5rem", borderRadius: "6px", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700, flexShrink: 0 }}
+      title={GENDER_LABEL[gender]}
+    >
+      {gender === "X" ? "•" : gender}
+    </span>
+  );
+}
+function SkillChip({ skill }) {
+  return (
+    <span style={{ background: COLORS.bg, color: COLORS.court, border: `1px solid ${COLORS.line}`, borderRadius: "6px", padding: "2px 8px", fontSize: "0.75rem", fontWeight: 700 }}>
+      {skill.toFixed(1)}
+    </span>
+  );
+}
+
+function App() {
+  const saved = loadSaved();
+  const [players, setPlayers] = useState(saved?.players || []);
+  const [nextId, setNextId] = useState(saved?.nextId || 1);
+  const [nextOrder, setNextOrder] = useState(saved?.nextOrder || 1);
+  const [numCourts, setNumCourts] = useState(saved?.numCourts || 2);
+  const [courts, setCourts] = useState(saved?.courts || [null, null]);
+  const [sortMode, setSortMode] = useState(saved?.sortMode || "skill-gender");
+  const [assignMode, setAssignMode] = useState(saved?.assignMode || "open");
+  const [form, setForm] = useState({ name: "", gender: "F", skill: 3.0 });
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ players, nextId, nextOrder, numCourts, courts, sortMode, assignMode })
+      );
+    } catch (e) {}
+  }, [players, nextId, nextOrder, numCourts, courts, sortMode, assignMode]);
+
+  function getPlayer(id) {
+    return players.find((p) => p.id === id);
+  }
+
+  function sortedQueue() {
+    const queue = players.filter((p) => p.status === "queue");
+    const byOrder = (a, b) => a.order - b.order;
+    if (sortMode === "skill") {
+      return [...queue].sort((a, b) => b.skill - a.skill || byOrder(a, b));
+    }
+    if (sortMode === "gender-skill") {
+      const rank = { F: 0, M: 1, X: 2 };
+      return [...queue].sort((a, b) => rank[a.gender] - rank[b.gender] || b.skill - a.skill || byOrder(a, b));
+    }
+    if (sortMode === "skill-gender") {
+      const rank = { F: 0, M: 1, X: 2 };
+      const tierRank = (p) => TIERS.findIndex((t) => t.id === getTier(p.skill).id);
+      return [...queue].sort((a, b) => tierRank(b) - tierRank(a) || rank[a.gender] - rank[b.gender] || byOrder(a, b));
+    }
+    return queue.sort(byOrder);
+  }
+
+  function groupedQueue() {
+    const queue = sortedQueue();
+    if (sortMode === "gender-skill") {
+      const groups = []; let last = null;
+      queue.forEach((p) => {
+        if (p.gender !== last) { groups.push({ label: GENDER_GROUP_LABEL[p.gender], items: [] }); last = p.gender; }
+        groups[groups.length - 1].items.push(p);
+      });
+      return groups;
+    }
+    if (sortMode === "skill-gender") {
+      const groups = []; let last = null;
+      queue.forEach((p) => {
+        const tier = getTier(p.skill).label;
+        if (tier !== last) { groups.push({ label: tier, items: [] }); last = tier; }
+        groups[groups.length - 1].items.push(p);
+      });
+      return groups;
+    }
+    return [{ label: null, items: queue }];
+  }
+
+  function handleAdd(e) {
+    e.preventDefault();
+    const name = form.name.trim();
+    if (!name) { setMessage("Enter a name before adding to the queue."); return; }
+    setPlayers((prev) => [...prev, { id: nextId, name, gender: form.gender, skill: form.skill, status: "queue", order: nextOrder, courtIndex: null }]);
+    setNextId((n) => n + 1);
+    setNextOrder((n) => n + 1);
+    setForm({ name: "", gender: form.gender, skill: form.skill });
+    setMessage("");
+  }
+
+  function removeFromQueue(id) {
+    setPlayers((prev) => prev.filter((p) => p.id !== id));
+  }
+
+  function changeCourts(delta) {
+    const newCount = numCourts + delta;
+    if (newCount < 1) return;
+    if (delta > 0) {
+      setCourts((prev) => [...prev, null]);
+      setNumCourts(newCount);
+    } else {
+      const last = courts[courts.length - 1];
+      if (last) { setMessage("Finish the game on that court before removing it."); return; }
+      setCourts((prev) => prev.slice(0, -1));
+      setNumCourts(newCount);
+      setMessage("");
+    }
+  }
+
+  function assignCourt(index) {
+    const queue = sortedQueue();
+    let picked = [];
+    if (assignMode === "open") {
+      picked = queue.slice(0, 4);
+    } else if (assignMode === "same-gender") {
+      if (queue.length > 0) {
+        const g = queue[0].gender;
+        picked = queue.filter((p) => p.gender === g).slice(0, 4);
+      }
+    } else if (assignMode === "mixed") {
+      const women = queue.filter((p) => p.gender === "F").slice(0, 2);
+      const men = queue.filter((p) => p.gender === "M").slice(0, 2);
+      picked = [...women, ...men];
+    }
+    if (picked.length < 4) { setMessage("Not enough matching players waiting in line for this match type yet."); return; }
+    const ids = picked.map((p) => p.id);
+    setPlayers((prev) => prev.map((p) => (ids.includes(p.id) ? { ...p, status: "court", courtIndex: index } : p)));
+    setCourts((prev) => prev.map((c, i) => (i === index ? { ids } : c)));
+    setMessage("");
+  }
+
+  function finishGame(index) {
+    const court = courts[index];
+    if (!court) return;
+    let order = nextOrder;
+    setPlayers((prev) => prev.map((p) => {
+      if (court.ids.includes(p.id)) {
+        const updated = { ...p, status: "queue", courtIndex: null, order };
+        order += 1;
+        return updated;
+      }
+      return p;
+    }));
+    setNextOrder(order);
+    setCourts((prev) => prev.map((c, i) => (i === index ? null : c)));
+  }
+
+  function resetAll() {
+    if (!window.confirm("Clear every player and reset all courts? This can't be undone.")) return;
+    setPlayers([]); setNextId(1); setNextOrder(1); setNumCourts(2); setCourts([null, null]);
+    setMessage("");
+    try { window.localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  }
+
+  const queueCount = players.filter((p) => p.status === "queue").length;
+  const inPlayCount = courts.filter(Boolean).length;
+  const groups = groupedQueue();
+
+  return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, fontFamily: BODY_FONT, color: COLORS.ink, paddingBottom: "2rem" }}>
+      <header style={{ padding: "1.25rem 1.25rem", background: COLORS.court, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
+        <div>
+          <h1 style={{ fontFamily: DISPLAY_FONT, color: COLORS.ball, letterSpacing: "-0.02em", fontSize: "1.9rem", margin: 0 }}>Paddle Queue</h1>
+          <p style={{ color: COLORS.chalk, fontSize: "0.85rem", margin: "0.25rem 0 0" }}>
+            {queueCount} waiting in line · {inPlayCount}/{numCourts} courts in play
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <span style={{ fontSize: "0.85rem", color: COLORS.chalk }}>Courts</span>
+          <div style={{ display: "flex", alignItems: "center", borderRadius: "6px", overflow: "hidden", border: `1px solid ${COLORS.courtLine}` }}>
+            <button onClick={() => changeCourts(-1)} style={{ padding: "0.4rem 0.8rem", background: COLORS.courtLight, color: COLORS.bg, border: "none" }}>−</button>
+            <span style={{ padding: "0.4rem 0.8rem", background: COLORS.paper, color: COLORS.ink, minWidth: "2.25rem", textAlign: "center", fontWeight: 700 }}>{numCourts}</span>
+            <button onClick={() => changeCourts(1)} style={{ padding: "0.4rem 0.8rem", background: COLORS.courtLight, color: COLORS.bg, border: "none" }}>+</button>
+          </div>
+          <button onClick={resetAll} style={{ fontSize: "0.8rem", color: COLORS.chalk, background: "none", border: `1px solid ${COLORS.courtLine}`, borderRadius: "6px", padding: "0.4rem 0.6rem" }}>Reset</button>
+        </div>
+      </header>
+
+      <main style={{ padding: "1.25rem", maxWidth: "960px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "1.75rem" }}>
+        {message && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: "6px", padding: "0.75rem 1rem", fontSize: "0.9rem", background: "#FBEFE8", border: `1px solid ${COLORS.coral}` }}>
+            <span>{message}</span>
+            <button onClick={() => setMessage("")} style={{ background: "none", border: "none", fontSize: "1rem", cursor: "pointer" }}>×</button>
+          </div>
+        )}
+
+        <section>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", marginBottom: "0.75rem" }}>
+            <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: "1.25rem", margin: 0 }}>Courts</h2>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem" }}>
+              <span style={{ color: COLORS.inkSoft }}>Fill courts with</span>
+              <select value={assignMode} onChange={(e) => setAssignMode(e.target.value)} style={{ borderRadius: "6px", padding: "0.4rem 0.5rem", fontSize: "0.85rem", border: `1px solid ${COLORS.line}`, background: COLORS.paper }}>
+                <option value="open">Next 4 in line</option>
+                <option value="same-gender">Same-gender group</option>
+                <option value="mixed">Mixed doubles (2 women + 2 men)</option>
+              </select>
+            </label>
+          </div>
+
+          <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))" }}>
+            {courts.map((court, i) => (
+              <div key={i} style={{ borderRadius: "6px", padding: "1rem", background: court ? COLORS.court : COLORS.paper, border: `2px dashed ${court ? COLORS.courtLine : COLORS.line}`, minHeight: "170px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 700, color: court ? COLORS.chalk : COLORS.inkSoft }}>Court {i + 1}</span>
+                  {court && (
+                    <button onClick={() => finishGame(i)} style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.75rem", fontWeight: 700, borderRadius: "6px", padding: "0.3rem 0.55rem", background: COLORS.ball, color: COLORS.court, border: "none" }}>
+                      ↻ Finish game
+                    </button>
+                  )}
+                </div>
+                {court ? (
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                    {court.ids.map((id) => {
+                      const p = getPlayer(id);
+                      if (!p) return null;
+                      return (
+                        <li key={id} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem", color: COLORS.bg }}>
+                          <GenderChip gender={p.gender} />
+                          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                          <span style={{ fontSize: "0.75rem", fontWeight: 700, color: COLORS.ball }}>{p.skill.toFixed(1)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "0.75rem" }}>
+                    <p style={{ fontSize: "0.9rem", color: COLORS.inkSoft, margin: 0 }}>Court open.</p>
+                    <button onClick={() => assignCourt(i)} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.9rem", fontWeight: 700, borderRadius: "6px", padding: "0.45rem 0.9rem", background: COLORS.court, color: COLORS.ball, border: "none" }}>
+                      Fill court
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "1fr" }}>
+          <div style={{ borderRadius: "6px", padding: "1.25rem", background: COLORS.paper, border: `1px solid ${COLORS.line}` }}>
+            <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: "1.25rem", margin: "0 0 1rem" }}>Add a player</h2>
+            <form onSubmit={handleAdd} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "0.85rem", color: COLORS.inkSoft, marginBottom: "0.25rem" }}>Name</label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Jamie Cruz"
+                  style={{ width: "100%", borderRadius: "6px", padding: "0.6rem 0.75rem", fontSize: "0.9rem", border: `1px solid ${COLORS.line}` }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "0.85rem", color: COLORS.inkSoft, marginBottom: "0.25rem" }}>Gender</label>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  {["F", "M", "X"].map((g) => (
+                    <button type="button" key={g} onClick={() => setForm({ ...form, gender: g })}
+                      style={{ flex: 1, borderRadius: "6px", padding: "0.55rem", fontSize: "0.9rem", fontWeight: 700,
+                        background: form.gender === g ? GENDER_COLOR[g] : COLORS.bg,
+                        color: form.gender === g ? "#fff" : COLORS.ink,
+                        border: `1px solid ${form.gender === g ? GENDER_COLOR[g] : COLORS.line}` }}>
+                      {GENDER_LABEL[g]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.85rem", color: COLORS.inkSoft, marginBottom: "0.25rem" }}>
+                  <span>Skill rating</span>
+                  <span style={{ fontWeight: 700, color: COLORS.ink }}>{form.skill.toFixed(1)} · {getTier(form.skill).label}</span>
+                </label>
+                <input type="range" min="2" max="5.5" step="0.5" value={form.skill}
+                  onChange={(e) => setForm({ ...form, skill: parseFloat(e.target.value) })} style={{ width: "100%" }} />
+              </div>
+              <button type="submit" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem", borderRadius: "6px", padding: "0.7rem", fontSize: "0.9rem", fontWeight: 700, background: COLORS.court, color: COLORS.ball, border: "none" }}>
+                + Add to queue
+              </button>
+            </form>
+          </div>
+
+          <div style={{ borderRadius: "6px", padding: "1.25rem", background: COLORS.paper, border: `1px solid ${COLORS.line}` }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
+              <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: "1.25rem", margin: 0 }}>Waiting line</h2>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem" }}>
+                <span style={{ color: COLORS.inkSoft }}>Sort by</span>
+                <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ borderRadius: "6px", padding: "0.4rem 0.5rem", fontSize: "0.85rem", border: `1px solid ${COLORS.line}`, background: COLORS.paper }}>
+                  <option value="skill-gender">Mastery level, then gender</option>
+                  <option value="gender-skill">Gender, then mastery level</option>
+                  <option value="skill">Mastery level only</option>
+                </select>
+              </label>
+            </div>
+
+            {queueCount === 0 ? (
+              <p style={{ fontSize: "0.9rem", padding: "2rem 0", textAlign: "center", color: COLORS.inkSoft }}>
+                No one's in line yet. Add a player to get started.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                {groups.map((group, gi) => (
+                  <div key={gi}>
+                    {group.label && (
+                      <div style={{ fontSize: "0.75rem", fontWeight: 700, color: COLORS.inkSoft, marginBottom: "0.5rem", paddingBottom: "0.25rem", borderBottom: `1px dashed ${COLORS.line}` }}>
+                        {group.label}
+                      </div>
+                    )}
+                    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                      {group.items.map((p, idx) => (
+                        <li key={p.id} style={{ display: "flex", alignItems: "center", gap: "0.75rem", borderRadius: "6px", padding: "0.5rem", background: idx % 2 ? COLORS.bg : "transparent" }}>
+                          <span style={{ fontSize: "0.75rem", width: "1.25rem", textAlign: "right", color: COLORS.inkSoft }}>
+                            {players.filter((q) => q.status === "queue").sort((a, b) => a.order - b.order).findIndex((q) => q.id === p.id) + 1}
+                          </span>
+                          <GenderChip gender={p.gender} />
+                          <span style={{ flex: 1, fontSize: "0.9rem", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                          <SkillChip skill={p.skill} />
+                          <button onClick={() => removeFromQueue(p.id)} aria-label={`Remove ${p.name}`} style={{ background: "none", border: "none", color: COLORS.inkSoft, fontSize: "1.1rem", lineHeight: 1, cursor: "pointer" }}>×</button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
